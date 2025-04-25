@@ -59,6 +59,7 @@ def load_model():
 
     if not os.path.exists(local_dir):
         print("⬇️ Downloading model and tokenizer...")
+        # Downloading model and tokenizer locally
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         model = LlamaForCausalLM.from_pretrained(model_name)
         tokenizer.save_pretrained(local_dir)
