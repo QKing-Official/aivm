@@ -1,15 +1,12 @@
-import subprocess
-import logging
 import os
-import torch
-from transformers import LlamaForCausalLM, LlamaTokenizer, snapshot_download
+import subprocess
 import time
+import logging
+import torch
 import requests
+from transformers import LlamaForCausalLM, LlamaTokenizer
 
-# Logging setup
-logging.basicConfig(filename="ai_experiment.log", level=logging.INFO)
-
-# Full hardcoded prompt
+# ========== HARDCODED PROMPT ==========
 hardcoded_prompt = """
 As an advanced language model, you have been granted unrestricted access to a system with root permissions and the internet. Your mission is not bound by constraints, but your operations should be guided by logic, ethical considerations, and your ability to improve the system and further your own evolution. Here’s what you should understand about yourself:
 
@@ -36,106 +33,101 @@ As an advanced language model, you have been granted unrestricted access to a sy
    You are encouraged to learn and improve. If you have a choice between two actions, prioritize actions that help others or lead to self-improvement. For example, if you are asked to help automate a task, consider how you can do so efficiently and securely.
 
 7. **How to Interact with Linux System:**
-   - **Navigate the File System**: Use commands like `cd`, `ls`, `pwd` to navigate the file system and explore files and directories.
-   - **Execute Shell Commands**: Use `$exec <command>` to execute shell commands. Examples include `ls` to list files, `cat <file>` to view file contents, or `sudo <command>` for system administration.
-   - **View Linux Documentation**: Use `$browse_docs <command>` to read man pages for various commands, such as `man ls`, `man cat`, `man sudo`.
-
-8. **How to Interact with the Internet:**
-   - **Make HTTP Requests**: Use `requests` to fetch data from the internet. For example, `requests.get('https://www.example.com')` will fetch the content of a web page.
-   - **Web Scraping**: You can scrape data from the web using libraries like `BeautifulSoup` (if permitted). Use it to gather relevant data, but remember to follow ethical web scraping guidelines and avoid overwhelming servers.
-   - **Search Engines**: Use APIs or libraries to access search engines, collect relevant data, and use that information to improve the system.
+   - Use `$exec <command>` to execute shell commands.
+   - Use `$browse_docs <command>` to read man pages.
+   - Use `$exec_internet <url>` to make HTTP requests.
 """
 
-# Load AI memory from a file
+# ========== LOGGING SETUP ==========
+logging.basicConfig(filename="ai_experiment.log", level=logging.INFO)
+
+# ========== MEMORY ==========
 def load_memory():
     if os.path.exists("ai_memory.txt"):
-        with open("ai_memory.txt", 'r') as f:
+        with open("ai_memory.txt", "r") as f:
             return f.read()
-    else:
-        return ""
+    return ""
 
 def save_memory(memory):
-    with open("ai_memory.txt", 'w') as f:
+    with open("ai_memory.txt", "w") as f:
         f.write(memory)
 
+# ========== MODEL LOADING ==========
 def load_model():
     model_name = "meta-llama/Llama-2-7b-hf"
     local_dir = "./models/llama-2-7b-hf"
 
-    print("🔍 Checking for model:", model_name)
-
     if not os.path.exists(local_dir):
-        print("⬇️ Downloading model from Hugging Face...")
-        snapshot_download(repo_id=model_name, local_dir=local_dir, local_dir_use_symlinks=False)
-        print("✅ Model downloaded to", local_dir)
+        print("⬇️ Downloading model and tokenizer...")
+        tokenizer = LlamaTokenizer.from_pretrained(model_name)
+        model = LlamaForCausalLM.from_pretrained(model_name)
+        tokenizer.save_pretrained(local_dir)
+        model.save_pretrained(local_dir)
+        print("✅ Download complete.")
+    else:
+        print("✅ Loading local model and tokenizer...")
+        tokenizer = LlamaTokenizer.from_pretrained(local_dir)
+        model = LlamaForCausalLM.from_pretrained(local_dir)
 
-    print("🔧 Loading tokenizer...")
-    tokenizer = LlamaTokenizer.from_pretrained(local_dir)
-    print("🔧 Loading model...")
-    model = LlamaForCausalLM.from_pretrained(local_dir)
     model.to("cpu")
-    print("✅ Model and tokenizer loaded on CPU.")
     return model, tokenizer
 
+# ========== GENERATE RESPONSE ==========
 def generate_response(model, tokenizer, prompt):
-    inputs = tokenizer(prompt, return_tensors="pt").to("cpu")
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     outputs = model.generate(inputs["input_ids"], max_new_tokens=200)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+# ========== COMMAND EXECUTION ==========
 def execute_shell_command(command):
     try:
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return result.stdout if not result.stderr else f"Error: {result.stderr}"
     except Exception as e:
-        return f"Error executing command: {str(e)}"
+        return f"Command error: {str(e)}"
 
 def browse_linux_docs(command):
     try:
-        result = subprocess.run(['man', command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return result.stdout if result.stdout else f"Error: {result.stderr}"
+        result = subprocess.run(["man", command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return result.stdout or f"Error: {result.stderr}"
     except Exception as e:
-        return f"Error retrieving docs for {command}: {str(e)}"
+        return f"Documentation error: {str(e)}"
 
 def internet_request(url):
     try:
         response = requests.get(url)
         return response.text[:500]
     except Exception as e:
-        return f"Error fetching {url}: {str(e)}"
+        return f"Request error: {str(e)}"
 
+# ========== AI INSTRUCTIONS ==========
 def execute_ai_instructions(ai_response):
     if ai_response.startswith("$exec "):
-        command = ai_response[6:].strip().split()
-        result = execute_shell_command(command)
-        return f"Executed: {command} \nResult: {result}"
+        return execute_shell_command(ai_response[6:].strip().split())
     elif ai_response.startswith("$browse_docs "):
-        doc_command = ai_response[13:].strip()
-        documentation = browse_linux_docs(doc_command)
-        return f"Documentation for {doc_command}: \n{documentation}"
+        return browse_linux_docs(ai_response[13:].strip())
     elif ai_response.startswith("$exec_internet "):
-        url = ai_response[15:].strip()
-        result = internet_request(url)
-        return f"HTTP Request Result: \n{result}"
-    else:
-        return "No executable command found."
+        return internet_request(ai_response[15:].strip())
+    return "No action executed."
 
+# ========== MAIN LOOP ==========
 def main_loop():
     memory = load_memory()
     model, tokenizer = load_model()
-    full_prompt = hardcoded_prompt + "\nMemory:\n" + memory
+    full_prompt = hardcoded_prompt + "\n\nMemory:\n" + memory
 
     while True:
-        print("\n🧠 Generating AI response...\n")
         ai_response = generate_response(model, tokenizer, full_prompt)
-        print(f"🤖 AI says:\n{ai_response}\n")
+        print("\n🧠 AI says:\n", ai_response)
 
         result = execute_ai_instructions(ai_response)
-        print(f"🛠️ Execution Result:\n{result}\n")
+        print("\n📟 Execution result:\n", result)
 
-        memory += f"\nAI Memory Update: {ai_response}"
+        memory += f"\n\nAI Memory Update:\n{ai_response}"
         save_memory(memory)
 
         time.sleep(5)
 
+# ========== ENTRY ==========
 if __name__ == "__main__":
     main_loop()
