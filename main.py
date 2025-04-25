@@ -2,14 +2,14 @@ import subprocess
 import logging
 import os
 import torch
-from transformers import LlamaTokenizer, LlamaForCausalLM
+from transformers import LlamaForCausalLM, LlamaTokenizer, snapshot_download
 import time
 import requests
 
-# Setup logging
+# Logging setup
 logging.basicConfig(filename="ai_experiment.log", level=logging.INFO)
 
-# Hardcoded prompt
+# Full hardcoded prompt
 hardcoded_prompt = """
 As an advanced language model, you have been granted unrestricted access to a system with root permissions and the internet. Your mission is not bound by constraints, but your operations should be guided by logic, ethical considerations, and your ability to improve the system and further your own evolution. Here’s what you should understand about yourself:
 
@@ -46,45 +46,40 @@ As an advanced language model, you have been granted unrestricted access to a sy
    - **Search Engines**: Use APIs or libraries to access search engines, collect relevant data, and use that information to improve the system.
 """
 
+# Load AI memory from a file
 def load_memory():
     if os.path.exists("ai_memory.txt"):
         with open("ai_memory.txt", 'r') as f:
             return f.read()
-    return ""
+    else:
+        return ""
 
 def save_memory(memory):
     with open("ai_memory.txt", 'w') as f:
         f.write(memory)
 
 def load_model():
-    model_name = "meta-llama/Llama-2-7b-hf"  # Make sure you have access via HuggingFace
-    print(f"🔍 Checking for model: {model_name}")
-    print("📦 Downloading tokenizer...")
-    tokenizer = LlamaTokenizer.from_pretrained(model_name)
-    print("✅ Tokenizer ready.")
+    model_name = "meta-llama/Llama-2-7b-hf"
+    local_dir = "./models/llama-2-7b-hf"
 
-    print("📦 Downloading model (this may take a while)...")
-    model = LlamaForCausalLM.from_pretrained(model_name)
-    print("✅ Model downloaded.")
+    print("🔍 Checking for model:", model_name)
 
-    print("⚙️  Moving model to CPU...")
+    if not os.path.exists(local_dir):
+        print("⬇️ Downloading model from Hugging Face...")
+        snapshot_download(repo_id=model_name, local_dir=local_dir, local_dir_use_symlinks=False)
+        print("✅ Model downloaded to", local_dir)
+
+    print("🔧 Loading tokenizer...")
+    tokenizer = LlamaTokenizer.from_pretrained(local_dir)
+    print("🔧 Loading model...")
+    model = LlamaForCausalLM.from_pretrained(local_dir)
     model.to("cpu")
-    print("✅ Model ready on CPU.")
-
+    print("✅ Model and tokenizer loaded on CPU.")
     return model, tokenizer
 
 def generate_response(model, tokenizer, prompt):
-    inputs = tokenizer(prompt, return_tensors='pt', truncation=True)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-
-    print("💬 Generating response...")
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=150,
-        do_sample=True,
-        temperature=0.7,
-        pad_token_id=tokenizer.eos_token_id
-    )
+    inputs = tokenizer(prompt, return_tensors="pt").to("cpu")
+    outputs = model.generate(inputs["input_ids"], max_new_tokens=200)
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 def execute_shell_command(command):
@@ -99,28 +94,20 @@ def browse_linux_docs(command):
         result = subprocess.run(['man', command], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return result.stdout if result.stdout else f"Error: {result.stderr}"
     except Exception as e:
-        return f"Error retrieving documentation for {command}: {str(e)}"
+        return f"Error retrieving docs for {command}: {str(e)}"
 
 def internet_request(url):
     try:
         response = requests.get(url)
         return response.text[:500]
     except Exception as e:
-        return f"Error fetching URL {url}: {str(e)}"
-
-def update_prompt(new_instructions):
-    updated_prompt = hardcoded_prompt + "\n" + new_instructions
-    return updated_prompt
+        return f"Error fetching {url}: {str(e)}"
 
 def execute_ai_instructions(ai_response):
     if ai_response.startswith("$exec "):
         command = ai_response[6:].strip().split()
         result = execute_shell_command(command)
         return f"Executed: {command} \nResult: {result}"
-    elif ai_response.startswith("$upgrade "):
-        new_prompt = ai_response[8:].strip()
-        update_prompt(new_prompt)
-        return f"Upgraded prompt with new instructions: {new_prompt}"
     elif ai_response.startswith("$browse_docs "):
         doc_command = ai_response[13:].strip()
         documentation = browse_linux_docs(doc_command)
@@ -135,15 +122,15 @@ def execute_ai_instructions(ai_response):
 def main_loop():
     memory = load_memory()
     model, tokenizer = load_model()
-
     full_prompt = hardcoded_prompt + "\nMemory:\n" + memory
 
     while True:
+        print("\n🧠 Generating AI response...\n")
         ai_response = generate_response(model, tokenizer, full_prompt)
-        print(f"\n🤖 AI says:\n{ai_response}\n")
+        print(f"🤖 AI says:\n{ai_response}\n")
 
         result = execute_ai_instructions(ai_response)
-        print(result)
+        print(f"🛠️ Execution Result:\n{result}\n")
 
         memory += f"\nAI Memory Update: {ai_response}"
         save_memory(memory)
