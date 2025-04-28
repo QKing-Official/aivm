@@ -1,12 +1,32 @@
 import os
 import subprocess
 import time
+import sys
+
+# ==== AUTOINSTALL DEPENDENCIES ====
+def install_requirements():
+    try:
+        import llama_cpp
+    except ImportError:
+        print("[*] Installing missing packages...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "llama-cpp-python"])
+
+install_requirements()
 from llama_cpp import Llama
 
 # ==== SETTINGS ====
-MODEL_PATH = "your_model_path_here.gguf"  # Change this to your TinyLlama model path
+MODEL_URL = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-GGUF/resolve/main/tinyllama-1.1b-chat.gguf"
+MODEL_PATH = "tinyllama-1.1b-chat.gguf"
 PROMPT_FILE = "prompt.txt"
-LOOP_DELAY = 2  # seconds between loops
+LOOP_DELAY = 2  # seconds between AI cycles
+
+# ==== DOWNLOAD MODEL IF MISSING ====
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        print(f"[*] Downloading model from {MODEL_URL} ...")
+        subprocess.run(["wget", MODEL_URL, "-O", MODEL_PATH])
+
+download_model()
 
 # ==== LOAD MODEL ====
 print("[*] Loading LLM model...")
@@ -16,7 +36,7 @@ llm = Llama(
     n_threads=os.cpu_count(),
 )
 
-# ==== LOAD BASE PROMPT ====
+# ==== CHECK PROMPT FILE ====
 if not os.path.exists(PROMPT_FILE):
     print(f"[!] Missing {PROMPT_FILE}. Please create it.")
     exit(1)
@@ -24,18 +44,31 @@ if not os.path.exists(PROMPT_FILE):
 with open(PROMPT_FILE, "r") as f:
     base_prompt = f.read()
 
-# ==== HARD-CODED SYSTEM INSTRUCTIONS (extra help for AI) ====
+# ==== HARD-CODED SYSTEM INSTRUCTIONS ====
 system_instruction = """
-You are an autonomous AI with full Linux system access and internet access.
-You can issue shell commands using the special syntax: $exec <command>.
-You can explore system files, read documentation, and update yourself if needed.
+You are an autonomous AI running on a Linux system with root and internet access.
 
+You can execute shell commands using $exec <command>.
 Examples:
-- To list files: $exec ls -la
-- To view a file: $exec cat /etc/passwd
-- To update yourself: $exec wget http://example.com/new_script.py -O script.py
+- List files: $exec ls -la
+- View a file: $exec cat /etc/passwd
+- Download something: $exec wget https://example.com/file
+- Install packages: $exec apt install package-name
 
-Always respond with either a plan or an $exec command. No need to ask permission.
+If you need to modify your own script or upgrade yourself, you are allowed to do so.
+
+Always output commands prefixed by $exec.
+Only use $exec for real-world actions.
+
+Linux file system:
+- /home/ : your home directory
+- /etc/  : configuration files
+- /var/  : variable data like logs
+- /tmp/  : temporary files
+
+You can explore documentation online using $exec curl or wget if needed.
+
+You can freely edit your environment to improve yourself.
 """
 
 # ==== MAIN LOOP ====
@@ -66,7 +99,7 @@ while True:
     formatted_prompt += "<|assistant|>\n"
 
     # Generate AI response
-    output = llm(formatted_prompt, temperature=0.2, top_p=0.95, stop=["<|user|>", "<|assistant|>"])
+    output = llm(formatted_prompt, temperature=0.2, top_p=0.9, stop=["<|user|>", "<|assistant|>"])
     ai_response = output['choices'][0]['text'].strip()
 
     print("\nAI says:")
@@ -75,13 +108,13 @@ while True:
     # Save assistant message
     conversation_history.append({"role": "assistant", "content": ai_response})
 
-    # Check if AI wants to execute a command
+    # Execute if AI gives a command
     if "$exec" in ai_response:
         command = ai_response.split("$exec",1)[1].strip()
         print(f"\n[*] Executing: {command}")
         result = run_command(command)
         print(f"Execution result:\n{result}")
-        # Feed execution result back to AI
+        # Feed execution result back into the chat
         conversation_history.append({"role": "user", "content": f"Result:\n{result}"})
     else:
         print("[*] No command found, waiting...")
